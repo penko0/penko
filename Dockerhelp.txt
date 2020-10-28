@@ -1,0 +1,90 @@
+
+#You can see the image id and parent id for all image created after the image in question with the following:
+
+docker inspect --format='{{.Id}} {{.Parent}}' \
+    $(docker images --filter since=f50f9524513f --quiet)
+	
+	
+#If we want to redirect the logs from container`s log file to the console, we must use RUN instruction in Dockerfile to create a link between log file and /dev/stdout or /dev/stderr(for errors output).Example for nginx follows:
+RUN rm /var/log/nginx/access.log && ln -s /dev/stdout /var/log/nginx/access.log
+
+
+#Example with ENV variables. -e defines a value for ENV variable.
+docker container run --rm --name pg -d -e "POSTGRES_USER=myuser" -e "POSTGRES_PASSWORD=secret" postgres:9.6.6-alpine
+docker container run --rm --link pg -it postgres:9.6.6-alpine psql -h pg -U myuser
+Docker Fundamentals :: Container behavior :: Configuring postgres
+
+
+#Example with ENTRYPOINT
+#This entry point is always executed before CMD.In the current configuration we can enter different commands and they will be executed when the
+#container starts.If there are not any commands specified , the CMD instruction will be executed.This is achieved by adding 'exec "$@"' in our 
+#"docker-entrypoint.sh" script
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
+Below is the content of our entrypoint script:
+#!/usr/bin/env bash
+envsubst '$PROXY_PROTOCOL,$PROXY_UPSTREAM' < /etc/nginx/conf.d/default.template > /etc/nginx/conf.d/default.conf #This envsubs tool is used to substitute variables, it gets them from file and send the to another file.
+
+exec "$@"
+### End of ENTRYPOINT script
+
+#The CMD insturction is part of Dockerfile and is executed by default if we have not configured any other commands when the container starts.
+ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]
+
+
+#Environment variables in Dockerfile
+#ARG is used in the process of image build
+ARG MYSHELL 
+#ENV is used when we run the container
+ENV CUSTOMSHELL=${MYSHELL:+true} if ARG MYSHELL is defined , then the CUSTOMSHELL variable will be set to "true"
+ENV MYSHELL=${MYSHELL:-bash} -here we define the default value for MYSHELL if it is not specified 
+ENV PKG=${MYSHELL}_x86 - with curly brackets we define beginning and end of the variable
+
+
+#Multistage build - Can be used when we do not need to use everything from the main build,in this way we make the image lightweight .For example, we do not need to compile hello-world.go every time(RUN go build hello-world.go),
+#instead we copy the compiled app into new build(alpine:3.6). In the final build, we have only compiled application ready to run.
+ 
+FROM golang:1.9.2-alpine as builder
+WORKDIR /go/src/app
+COPY hello-world.go .
+RUN go build hello-world.go
+CMD ./hello-world
+
+FROM alpine:3.6
+
+COPY --from=builder /go/src/app/hello-world /
+
+CMD /hello-world
+
+#Docker SWARM service with VOLUMES on a particular node and memery reservation.Also there is a constraint for the application to run on a given node.
+docker service create --network service-net --name demo-db --constraint node.id==tspttzs9blahydyw4l8wrbnxz --reserve-memory 256M --env-file .env --mount src=volume1,dst=/var/lib/postgresql/data,type=volume  jfahrer/swarm-demo-db:v1
+
+#How to create one docker-stack.yml file from two docker-compose files:
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml config > docker-stack.yml #docker-compose.yml has only basic configuration, but the other file has settings for production environment.
+
+#When we want to restart tasks for some service, we must use "docker service update --force" command.
+
+#When maintenance for a node is needed,we have to put it in "drain" state.After that we can get it back to normal operation.
+docker node update availability=drain node2
+docker node ls
+docker node update availability=active node2
+
+#To read Docker daemon logs: Use the command journalctl -u docker.service or check out /var/log/syslog
+#To reload Docker daemon configuration: kill -SIGHUP $(pidof dockerd)
+#To enable support of CGROUPS:
+Log into the Ubuntu or Debian host as a user with sudo privileges.
+Edit the /etc/default/grub file. Add or edit the GRUB_CMDLINE_LINUX line to add the following two key-value pairs:
+GRUB_CMDLINE_LINUX="cgroup_enable=memory swapaccount=1"
+Save and close the file.
+Update GRUB.
+$ sudo update-grub
+##############
+#Recover from losing the quorum of our SWARM cluster.After that we have to rejoin the managers.The best way to recover from losing the quorum is to bring the failed nodes back online. 
+#To restore the swarm cluster, backup should be created on the remaining manager node. First we stop docker and backup /var/lib/docker/swarm. Afterwards we delete the contents of /var/lib/docker/swarm and start docker.Stop docker
+again and restore the contents of swarm directory from the backup we have created.Now we can start docker again and initialize new cluster.
+#https://docs.docker.com/engine/swarm/admin_guide/#back-up-the-swarm
+#This command should be run on the remaining available manager: docker swarm init --force-new-cluster --advertise-addr (ip address):2377
+
+#To resolve the DNS name of individual tasks for given service, we can use  nslookup "tasks.(service name)"
+#To copy a file from container to our local system we use: docker container cp c1:/app/Gemfile.lock . # c1 is the name of our container.
